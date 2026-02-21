@@ -24,7 +24,10 @@ class User(db.Model):
 with app.app_context():
     db.create_all()
 
+
+# ======================
 # CREATE
+# ======================
 @app.route("/users", methods=["POST"])
 def create_user():
     data = request.json
@@ -32,47 +35,84 @@ def create_user():
     db.session.add(user)
     db.session.commit()
     redis_client.flushall()  # сброс кеша
-    return jsonify({"message": "User created"})
+    return jsonify({"message": "User created"}), 201
 
-# READ
+
+# ======================
+# READ ALL (с кешированием)
+# ======================
 @app.route("/users", methods=["GET"])
 def get_users():
     cached = redis_client.get("users")
+
     if cached:
-        return cached  # возвращаем кешированное значение
+        return cached, 200, {"Content-Type": "application/json"}
 
     users = User.query.all()
     result = [{"id": u.id, "name": u.name, "email": u.email} for u in users]
 
-    # кешируем результат в Redis на 60 секунд
-    redis_client.setex("users", 60, jsonify(result).get_data())
-    return jsonify(result)
+    response = jsonify(result)
 
+    # кешируем результат в Redis на 60 секунд
+    redis_client.setex("users", 60, response.get_data())
+
+    return response
+
+
+# ======================
+# READ ONE
+# ======================
+@app.route("/users/<int:id>", methods=["GET"])
+def get_user(id):
+    user = User.query.get(id)
+
+    if not user:
+        return jsonify({"message": "User not found"}), 404
+
+    return jsonify({
+        "id": user.id,
+        "name": user.name,
+        "email": user.email
+    })
+
+
+# ======================
 # UPDATE
+# ======================
 @app.route("/users/<int:id>", methods=["PUT"])
 def update_user(id):
     user = User.query.get(id)
+
     if not user:
         return jsonify({"message": "User not found"}), 404
 
     data = request.json
     user.name = data.get("name", user.name)
     user.email = data.get("email", user.email)
+
     db.session.commit()
     redis_client.flushall()
+
     return jsonify({"message": "Updated"})
 
+
+# ======================
 # DELETE
+# ======================
 @app.route("/users/<int:id>", methods=["DELETE"])
 def delete_user(id):
     user = User.query.get(id)
+
     if not user:
         return jsonify({"message": "User not found"}), 404
 
     db.session.delete(user)
     db.session.commit()
     redis_client.flushall()
+
     return jsonify({"message": "Deleted"})
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000)
+    
